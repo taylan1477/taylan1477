@@ -2,54 +2,106 @@ name: Update Steam Stats
 
 on:
   schedule:
-    # Her gün günceller
-    - cron: '0 0 * * *'
+    - cron: '0 12 * * *'  # Her gün UTC 12:00'de (TSİ 15:00) günceller
   workflow_dispatch:
 
 jobs:
-  update-stats:
+  update-steam-stats:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests python-valve
 
       - name: Fetch Steam data
+        env:
+          STEAM_API_KEY: ${{ secrets.STEAM_API_KEY }}
+          STEAM_ID64: "76561198070829618"  # Sizin SteamID64'niz
         run: |
-          STEAM_API_KEY="431A7C61694C4DB99CF1E7658F504483"
-          STEAM_ID="taylan1477"
-          
-          # Kullanıcı bilgilerini çek
-          USER_DATA=$(curl -s "http://api.steampowered.com/ISteamUser/GetPlayerSummaries/v0002/?key=${STEAM_API_KEY}&steamids=${STEAM_ID}")
-          
-          # Oyun istatistiklerini çek (CS:GO örneği)
-          GAME_STATS=$(curl -s "http://api.steampowered.com/ISteamUserStats/GetUserStatsForGame/v0002/?appid=730&key=${STEAM_API_KEY}&steamid=${STEAM_ID}" || echo '{}')
-          
-          # Verileri JSON dosyasına yaz
-          echo '{
-            "user": '"$USER_DATA"',
-            "game_stats": '"$GAME_STATS"'
-          }' > steam_data.json
-          
-          # JSON'u markdown'a dönüştür
-          echo '## 🎮 Steam İstatistiklerim' > steam_stats.md
-          echo '' >> steam_stats.md
-          echo '![Steam Profil](https://steamsignature.com/profile/default/76561198150804403.png)' >> steam_stats.md
-          echo '' >> steam_stats.md
-          echo '```json' >> steam_stats.md
-          cat steam_data.json >> steam_stats.md
-          echo '```' >> steam_stats.md
+          python -c '
+          import requests, json, os
+
+          STEAM_API_KEY = os.environ["STEAM_API_KEY"]
+          STEAM_ID64 = os.environ["STEAM_ID64"]
+
+          def get_steam_data():
+              try:
+                  # 1. Kullanıcı bilgileri
+                  user_url = f"https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v2/?key={STEAM_API_KEY}&steamids={STEAM_ID64}"
+                  user_data = requests.get(user_url).json()
+
+                  # 2. Seviye ve badge bilgisi
+                  badges_url = f"https://api.steampowered.com/IPlayerService/GetBadges/v1/?key={STEAM_API_KEY}&steamid={STEAM_ID64}"
+                  badges_data = requests.get(badges_url).json()
+
+                  # 3. Son oynanan oyun
+                  recent_url = f"https://api.steampowered.com/IPlayerService/GetRecentlyPlayedGames/v1/?key={STEAM_API_KEY}&steamid={STEAM_ID64}&count=1"
+                  recent_data = requests.get(recent_url).json()
+
+                  return {
+                      "success": True,
+                      "user": user_data.get("response", {}).get("players", [{}])[0],
+                      "badges": badges_data.get("response", {}),
+                      "recent_games": recent_data.get("response", {}).get("games", [{}])[0]
+                  }
+              except Exception as e:
+                  return {"success": False, "error": str(e)}
+
+          data = get_steam_data()
+          with open("steam_data.json", "w") as f:
+              json.dump(data, f, indent=2)
+          '
+
+      - name: Generate Markdown
+        run: |
+          # Hata kontrolü
+          if ! jq -e '.success' steam_data.json; then
+            echo "## 🎮 Steam İstatistikleri" > steam_stats.md
+            echo "" >> steam_stats.md
+            echo "⚠️ Steam verileri alınırken hata oluştu:" >> steam_stats.md
+            echo "```" >> steam_stats.md
+            jq -r '.error' steam_data.json >> steam_stats.md
+            echo "```" >> steam_stats.md
+            exit 0
+          fi
+
+          # Markdown oluştur
+          echo "## 🎮 Steam İstatistiklerim" > steam_stats.md
+          echo "" >> steam_stats.md
+
+          # Profil resmi ve temel bilgiler
+          echo "![Steam Avatar](https://steamcdn-a.akamaihd.net/steamcommunity/public/images/avatars/$(jq -r '.user.avatarhash' steam_data.json)_full.jpg)" >> steam_stats.md
+          echo "" >> steam_stats.md
+          echo "### $(jq -r '.user.personaname' steam_data.json)" >> steam_stats.md
+          echo "" >> steam_stats.md
+          echo "- **Durum:** $(jq -r '.user.personastate' steam_data.json | sed 's/0/🔴 Offline/;s/1/🟢 Online/;s/2/🟡 Busy/;s/3/🟠 Away/;s/4/🟣 Snooze/;s/5/🔵 Looking to trade/;s/6/🟢 Looking to play/')" >> steam_stats.md
+          echo "- **Seviye:** $(jq -r '.badges.player_level' steam_data.json)" >> steam_stats.md
+          echo "- " >> steam_stats.md
+          echo "- **Son Oyun:** $(jq -r '.recent_games.name' steam_data.json) ($(jq -r '.recent_games.playtime_2weeks/60 | round' steam_data.json) saat son 2 hafta)" >> steam_stats.md
+          echo "" >> steam_stats.md
+          echo "[🔗 Steam Profilim](https://steamcommunity.com/profiles/76561198070829618)" >> steam_stats.md
 
       - name: Update README
         run: |
-          # README'nin ilk kısmını al
-          sed -i '/## 🎮 Steam İstatistiklerim/q' README.md
-          
-          # Yeni istatistikleri ekle
-          cat steam_stats.md >> README.md
-          
-          # Commit yap
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
+          # README'nin üst kısmını koruyarak güncelle
+          if grep -q "## 🎮 Steam İstatistiklerim" README.md; then
+            sed -i '/## 🎮 Steam İstatistiklerim/,/## /{/## /!d}' README.md
+            sed -i '/## 🎮 Steam İstatistiklerim/r steam_stats.md' README.md
+          else
+            cat steam_stats.md >> README.md
+          fi
+
+          git config --local user.email "actions@github.com"
+          git config --local user.name "GitHub Actions"
           git add README.md
-          git commit -m "Update Steam stats"
+          git commit -m "🔧 Steam istatistikleri güncellendi [skip ci]"
           git push
