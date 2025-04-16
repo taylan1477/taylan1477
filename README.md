@@ -12,12 +12,7 @@
 - **Son Oynanan Oyun**: [VERİ]
 - **Toplam Oyun Süresi**: [VERİ] saat
 ## 🎮 Steam İstatistiklerim
+## 🎮 Steam İstatistikleri
 
-![Steam Profil](https://steamsignature.com/profile/default/76561198150804403.png)
+⚠️ Steam verileri alınırken hata oluştu:
 
-```json
-{
-  "user": {"response":{"players":[]}},
-  "game_stats": <html><head><title>Internal Server Error</title></head><body><h1>Internal Server Error</h1>Unknown problem determining WebApi request destination.</body></html>
-}
-```
