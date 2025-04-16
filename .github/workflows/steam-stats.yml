@@ -1,0 +1,55 @@
+name: Update Steam Stats
+
+on:
+  schedule:
+    # Her gün günceller
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+jobs:
+  update-stats:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Fetch Steam data
+        run: |
+          STEAM_API_KEY="431A7C61694C4DB99CF1E7658F504483"
+          STEAM_ID="taylan1477"
+          
+          # Kullanıcı bilgilerini çek
+          USER_DATA=$(curl -s "http://api.steampowered.com/ISteamUser/GetPlayerSummaries/v0002/?key=${STEAM_API_KEY}&steamids=${STEAM_ID}")
+          
+          # Oyun istatistiklerini çek (CS:GO örneği)
+          GAME_STATS=$(curl -s "http://api.steampowered.com/ISteamUserStats/GetUserStatsForGame/v0002/?appid=730&key=${STEAM_API_KEY}&steamid=${STEAM_ID}" || echo '{}')
+          
+          # Verileri JSON dosyasına yaz
+          echo '{
+            "user": '"$USER_DATA"',
+            "game_stats": '"$GAME_STATS"'
+          }' > steam_data.json
+          
+          # JSON'u markdown'a dönüştür
+          echo '## 🎮 Steam İstatistiklerim' > steam_stats.md
+          echo '' >> steam_stats.md
+          echo '![Steam Profil](https://steamsignature.com/profile/default/76561198150804403.png)' >> steam_stats.md
+          echo '' >> steam_stats.md
+          echo '```json' >> steam_stats.md
+          cat steam_data.json >> steam_stats.md
+          echo '```' >> steam_stats.md
+
+      - name: Update README
+        run: |
+          # README'nin ilk kısmını al
+          sed -i '/## 🎮 Steam İstatistiklerim/q' README.md
+          
+          # Yeni istatistikleri ekle
+          cat steam_stats.md >> README.md
+          
+          # Commit yap
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add README.md
+          git commit -m "Update Steam stats"
+          git push
